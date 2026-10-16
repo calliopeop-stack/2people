@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2인 대화 음성 번역기</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+    margin: 0; padding: 20px; background: #f4f5f7; color: #1f2328;
+    display: flex; justify-content: center;
+  }
+  .wrap { width: 100%; max-width: 900px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .panel { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select, label { font-size: 14px; }
+  button {
+    padding: 9px 16px; font-size: 14px; border-radius: 6px; cursor: pointer;
+    border: 1px solid #c9ccd1; background: #fff; transition: .15s;
+  }
+  button:hover:not(:disabled) { background: #f0f1f3; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .warn {
+    font-size: 12.5px; background: #fff8e6; border: 1px solid #f3e0a8;
+    border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; line-height: 1.6;
+  }
+  code { background: #eceef1; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  /* 화자 버튼 */
+  .speakers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .spk {
+    border: 2px solid #d9e0ea; border-radius: 12px; padding: 14px; text-align: center;
+    cursor: pointer; user-select: none; transition: .15s; background: #fafbfc;
+  }
+  .spk:hover { background: #f0f3f7; }
+  .spk.a { border-color: #2b6cb0; }
+  .spk.b { border-color: #b7791f; }
+  .spk .who { font-size: 13px; color: #6b7280; }
+  .spk .lang { font-size: 18px; font-weight: 700; margin: 4px 0; }
+  .spk .hint { font-size: 12px; color: #9aa0a6; }
+  .spk.listening { background: #fff1f0; border-color: #c53030 !important; animation: pulse 1.2s infinite; }
+  .spk.listening .hint { color: #c53030; font-weight: 600; }
+  .spk.disabled { opacity: .5; pointer-events: none; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(197,48,48,.15); } }
+  #live { min-height: 20px; font-size: 14px; color: #9aa0a6; margin-top: 8px; text-align: center; }
+
+  /* 대화창 */
+  #chat {
+    height: 420px; overflow-y: auto; padding: 14px; background: #f7f8fa;
+    border: 1px solid #e3e5e8; border-radius: 10px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .msg { max-width: 78%; padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.55; position: relative; }
+  .msg.a { align-self: flex-start; background: #e4eefa; border-bottom-left-radius: 3px; }
+  .msg.b { align-self: flex-end; background: #fbefd6; border-bottom-right-radius: 3px; }
+  .msg .orig { color: #555; font-size: 13px; }
+  .msg .trans { font-weight: 600; margin-top: 4px; font-size: 15px; }
+  .msg .tag { font-size: 11px; color: #9aa0a6; margin-top: 4px; display: flex; gap: 8px; align-items: center; }
+  .msg .tag button { padding: 1px 7px; font-size: 11px; }
+  .msg.speaking { outline: 2px solid #2f855a; }
+  .meta { font-size: 12px; color: #6b7280; margin-top: 8px; min-height: 16px; }
+  .err { color: #c53030; }
+  input[type=range] { width: 100px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>2인 대화 음성 번역기</h1>
+  <div class="warn" id="engineInfo">엔진 확인 중...</div>
+
+  <div class="panel">
+    <div class="row">
+      <label><b>화자 A</b>: 한국어 (고정)</label>
+      <label style="margin-left:12px"><b>화자 B</b>: <select id="bLang"></select></label>
+      <label style="margin-left:auto"><input type="checkbox" id="autoSpeak" checked> 번역 즉시 읽기</label>
+      <label><input type="checkbox" id="detectBox" checked> 버튼 잘못 눌러도 언어 자동 보정</label>
+      <label>속도 <input type="range" id="rate" min="0.5" max="1.8" step="0.1" value="1"></label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="speakers">
+      <div class="spk a" id="spkA">
+        <div class="who">화자 A</div>
+        <div class="lang">한국어</div>
+        <div class="hint" id="hintA">눌러서 말하기</div>
+      </div>
+      <div class="spk b" id="spkB">
+        <div class="who">화자 B</div>
+        <div class="lang" id="langB">영어</div>
+        <div class="hint" id="hintB">눌러서 말하기</div>
+      </div>
+    </div>
+    <div id="live"></div>
+  </div>
+
+  <div class="panel">
+    <div id="chat"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="stopSpeakBtn">음성 정지</button>
+      <button id="clearBtn">대화 지우기</button>
+      <button id="copyBtn">대화 복사</button>
+      <span class="meta" id="meta" style="margin-left:auto"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const synth = window.speechSynthesis;
+
+  const LANGS = {
+    ko:  { name: '한국어',   sr: 'ko-KR',  tr: 'ko',  tts: ['ko'],       re: /[\uAC00-\uD7A3]/ },
+    en:  { name: '영어',     sr: 'en-US',  tr: 'en',  tts: ['en'] },
+    zh:  { name: '중국어',   sr: 'zh-CN',  tr: 'zh',  tts: ['zh'],       re: /[\u4E00-\u9FFF]/ },
+    fr:  { name: '프랑스어', sr: 'fr-FR',  tr: 'fr',  tts: ['fr'] },
+    es:  { name: '스페인어', sr: 'es-ES',  tr: 'es',  tts: ['es'] },
+    th:  { name: '태국어',   sr: 'th-TH',  tr: 'th',  tts: ['th'],       re: /[\u0E00-\u0E7F]/ },
+    fil: { name: '필리핀어', sr: 'fil-PH', tr: 'fil', tts: ['fil','tl'] },
+    vi:  { name: '베트남어', sr: 'vi-VN',  tr: 'vi',  tts: ['vi'] }
+  };
+  const DETECT_MAP = { ko:'ko', en:'en', zh:'zh', 'zh-Hans':'zh', 'zh-Hant':'zh',
+                       fr:'fr', es:'es', th:'th', fil:'fil', tl:'fil', vi:'vi' };
+
+  const E = {};
+  ['bLang','autoSpeak','detectBox','rate','spkA','spkB','hintA','hintB','langB','live',
+   'chat','stopSpeakBtn','clearBtn','copyBtn','meta','engineInfo'].forEach(k => E[k] = $(k));
+
+  for (const k in LANGS) if (k !== 'ko') E.bLang.add(new Option(LANGS[k].name, k));
+  E.bLang.value = 'en';
+
+  const setMeta = (m, err) => { E.meta.className = 'meta' + (err ? ' err' : ''); E.meta.textContent = m; };
+  const langOf = who => who === 'A' ? 'ko' : E.bLang.value;
+  const other  = who => who === 'A' ? 'B' : 'A';
+
+  /* ---------- 번역 / 언어감지 (on-device) ---------- */
+  const translators = {};
+  let detector = null, engineReady = false;
+
+  async function getTranslator(src, tgt) {
+    const key = src + '>' + tgt;
+    if (translators[key]) return translators[key];
+    const opts = { sourceLanguage: LANGS[src].tr, targetLanguage: LANGS[tgt].tr };
+    let t;
+    if ('Translator' in self) {
+      if (await Translator.availability(opts) === 'unavailable')
+        throw new Error(LANGS[src].name + '→' + LANGS[tgt].name + ' 언어팩 사용 불가');
+      t = await Translator.create({ ...opts, monitor(m) {
+        m.addEventListener('downloadprogress', e =>
+          setMeta(LANGS[src].name + '→' + LANGS[tgt].name + ' 언어팩 ' + Math.round(e.loaded * 100) + '%'));
+      }});
+    } else if (self.translation) t = await self.translation.createTranslator(opts);
+    else throw new Error('번역 엔진 없음');
+    translators[key] = t;
+    return t;
+  }
+
+  async function detectLang(text) {
+    try {
+      if ('LanguageDetector' in self) {
+        if (!detector) detector = await LanguageDetector.create();
+        for (const c of await detector.detect(text)) {
+          const k = DETECT_MAP[c.detectedLanguage];
+          if (k && c.confidence >= 0.5) return k;
+        }
+      }
+    } catch (_) {}
+    for (const k of ['ko','th','zh']) if (LANGS[k].re.test(text)) return k;
+    return null;
+  }
+
+  /* ---------- TTS ---------- */
+  let voices = [], queue = [], speaking = false;
+  const loadVoices = () => voices = synth.getVoices();
+  if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
+
+  function pickVoice(lang) {
+    const list = voices.filter(v => LANGS[lang].tts.some(p => v.lang.toLowerCase().startsWith(p)));
+    return list.find(v => v.localService) || list[0] || null;
+  }
+  function speak(item) {
+    const u = new SpeechSynthesisUtterance(item.text);
+    const v = pickVoice(item.lang);
+    if (v) u.voice = v; else setMeta(LANGS[item.lang].name + ' 음성이 없어 기본 음성으로 읽습니다 (OS 음성팩 설치 권장)', true);
+    u.lang = v ? v.lang : LANGS[item.lang].sr;
+    u.rate = parseFloat(E.rate.value);
+    u.onstart = () => { speaking = true; item.el && item.el.classList.add('speaking'); };
+    const done = () => { speaking = false; item.el && item.el.classList.remove('speaking'); nextInQueue(); };
+    u.onend = done; u.onerror = done;
+    synth.speak(u);
+  }
+  function enqueue(text, lang, el) { queue.push({ text, lang, el }); if (!speaking && !synth.speaking) nextInQueue(); }
+  function nextInQueue() { if (speaking) return; const n = queue.shift(); if (n) speak(n); }
+  function stopSpeaking() { queue = []; speaking = false; synth.cancel(); document.querySelectorAll('.msg.speaking').forEach(m => m.classList.remove('speaking')); }
+  setInterval(() => { if (synth && synth.speaking && !synth.paused) { synth.pause(); synth.resume(); } }, 10000);
+
+  /* ---------- 대화창 ---------- */
+  function addMsg(who, orig, trans, srcLang, tgtLang) {
+    const el = document.createElement('div');
+    el.className = 'msg ' + who.toLowerCase();
+    el.innerHTML =
+      '<div class="orig"></div><div class="trans"></div>' +
+      '<div class="tag"><span>화자 ' + who + ' · ' + LANGS[srcLang].name + ' → ' + LANGS[tgtLang].name + '</span><button>다시 듣기</button></div>';
+    el.querySelector('.orig').textContent = orig;
+    el.querySelector('.trans').textContent = trans;
+    el.querySelector('button').onclick = () => { stopSpeaking(); enqueue(trans, tgtLang, el); };
+    E.chat.appendChild(el);
+    E.chat.scrollTop = E.chat.scrollHeight;
+    return el;
+  }
+
+  async function handleUtterance(who, text) {
+    let src = langOf(who);
+    if (E.detectBox.checked) {
+      const d = await detectLang(text);
+      // 감지 결과가 상대 화자 언어이면 화자를 바꿔 처리
+      if (d && d !== src && d === langOf(other(who))) {
+        setMeta('언어 자동 보정: 화자 ' + other(who) + '(' + LANGS[d].name + ')로 처리');
+        who = other(who); src = d;
+      }
+    }
+    const tgt = langOf(other(who));
+    let out = text;
+    if (engineReady && src !== tgt) {
+      const t = await getTranslator(src, tgt);
+      out = (await t.translate(text)).trim();
+    }
+    const el = addMsg(who, text, out, src, tgt);
+    if (E.autoSpeak.checked) enqueue(out, tgt, el);
+    setMeta('화자 ' + who + ' 발화 처리 완료 · ' + new Date().toLocaleTimeString());
+  }
+
+  /* ---------- 음성 인식 (한 번에 한 사람, 한 발화) ---------- */
+  let recog = null, active = null;
+
+  function setListening(who) {
+    active = who;
+    E.spkA.classList.toggle('listening', who === 'A');
+    E.spkB.classList.toggle('listening', who === 'B');
+    E.spkA.classList.toggle('disabled', who === 'B');
+    E.spkB.classList.toggle('disabled', who === 'A');
+    E.hintA.textContent = who === 'A' ? '듣는 중... (다시 누르면 종료)' : '눌러서 말하기';
+    E.hintB.textContent = who === 'B' ? '듣는 중... (다시 누르면 종료)' : '눌러서 말하기';
+    if (!who) E.live.textContent = '';
+  }
+
+  function startListening(who) {
+    if (!SR) return;
+    stopSpeaking();            // 상대 음성 출력 중이면 끊고 듣기 (에코 방지)
+    const r = new SR();
+    r.lang = LANGS[langOf(who)].sr;
+    r.continuous = false;      // 한 발화 끝나면 자동 종료
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+    let finalText = '';
+    r.onstart = () => setListening(who);
+    r.onresult = e => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) finalText += res[0].transcript; else interim += res[0].transcript;
+      }
+      E.live.textContent = finalText || interim;
+    };
+    r.onerror = e => {
+      const map = { 'no-speech':'음성이 감지되지 않았습니다.', 'audio-capture':'마이크를 찾을 수 없습니다.',
+                    'not-allowed':'마이크 권한이 거부되었습니다.', 'network':'네트워크 오류입니다.',
+                    'language-not-supported':'이 언어의 음성 인식을 지원하지 않습니다.' };
+      if (e.error !== 'aborted') setMeta(map[e.error] || ('오류: ' + e.error), true);
+    };
+    r.onend = () => {
+      setListening(null); recog = null;
+      const t = finalText.trim();
+      if (t) handleUtterance(who, t).catch(err => setMeta('번역 실패: ' + err.message, true));
+    };
+    recog = r;
+    try { r.start(); } catch (err) { setMeta('시작 실패: ' + err.message, true); }
+  }
+
+  function toggle(who) {
+    if (active === who) { recog && recog.stop(); return; }
+    if (active) return;
+    startListening(who);
+  }
+  E.spkA.addEventListener('click', () => toggle('A'));
+  E.spkB.addEventListener('click', () => toggle('B'));
+
+  // 키보드: 1 = 화자 A, 2 = 화자 B
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+    if (e.key === '1') toggle('A');
+    if (e.key === '2') toggle('B');
+  });
+
+  /* ---------- 기타 UI ---------- */
+  E.bLang.addEventListener('change', () => { E.langB.textContent = LANGS[E.bLang.value].name; });
+  E.stopSpeakBtn.addEventListener('click', stopSpeaking);
+  E.clearBtn.addEventListener('click', () => { stopSpeaking(); E.chat.innerHTML = ''; E.meta.textContent = ''; });
+  E.copyBtn.addEventListener('click', async () => {
+    const lines = [...E.chat.querySelectorAll('.msg')].map(m =>
+      '[' + m.querySelector('.tag span').textContent + ']\n' +
+      m.querySelector('.orig').textContent + '\n→ ' + m.querySelector('.trans').textContent);
+    if (!lines.length) return;
+    try { await navigator.clipboard.writeText(lines.join('\n\n')); setMeta('대화가 복사되었습니다.'); }
+    catch (_) { setMeta('복사 실패', true); }
+  });
+  window.addEventListener('beforeunload', () => synth && synth.cancel());
+
+  (function init() {
+    const msgs = [];
+    if (!SR) { msgs.push('<b>음성 인식 미지원</b> — Chrome / Edge에서 열어주세요.'); E.spkA.classList.add('disabled'); E.spkB.classList.add('disabled'); }
+    if (!synth) { msgs.push('<b>음성 합성 미지원</b>'); E.autoSpeak.checked = false; E.autoSpeak.disabled = true; }
+    if (!('Translator' in self) && !self.translation)
+      msgs.push('<b>내장 번역 엔진 없음</b> — Chrome 138+ 필요 (<code>chrome://flags/#translation-api</code>). 원문만 표시됩니다.');
+    else engineReady = true;
+    if (!('LanguageDetector' in self)) msgs.push('언어 자동 보정은 문자 범위 휴리스틱(한글·태국·한자)으로만 동작합니다.');
+    E.engineInfo.innerHTML = msgs.length ? msgs.join('<br>')
+      : '<b>전 구간 브라우저 내장 엔진 사용 가능</b> — 번역·언어감지는 on-device, 외부 서버 전송 없음.';
+  })();
+})();
+</script>
+</body>
+</html>
